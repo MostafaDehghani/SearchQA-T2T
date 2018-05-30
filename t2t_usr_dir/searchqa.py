@@ -37,6 +37,12 @@ flags = tf.flags
 FLAGS = flags.FLAGS
 
 
+_DRIVE_URL = 'https://drive.google.com/file/d/0B51lBZ1gs1XTR3BIVTJQWkREQU0'
+_FILENAME = 'SearchQA'
+_UNK = "<UNK>"
+PAD = text_encoder.PAD_ID
+
+
 def _normalize_string(raw_str):
   """Normalizes the string using tokenizer.encode.
 
@@ -70,18 +76,12 @@ def _build_vocab(generator, vocab_dir, vocab_name, vocab_size):
     counter = collections.Counter(data)
     count_pairs = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
     words, _ = list(zip(*count_pairs))
-    words = [_UNK] + words[:vocab_size]
+    words = [_UNK] + list(words[:vocab_size])
     encoder = text_encoder.TokenTextEncoder(None, vocab_list=words)
     encoder.store_to_file(vocab_path)
   else:
     encoder = text_encoder.TokenTextEncoder(vocab_path)
   return encoder
-
-
-_DRIVE_URL = 'https://drive.google.com/file/d/0B51lBZ1gs1XTR3BIVTJQWkREQU0'
-_FILENAME = 'SearchQA'
-_UNK = "<UNK>"
-PAD = text_encoder.PAD_ID
 
 
 
@@ -107,15 +107,23 @@ def _parse_and_generate_searchqa_sampls(dataset_file):
       question = example[1].strip()
       answer = example[2].strip()
       if len(question) > 0 and len(answer) > 0:
-        passages = example[0].strip()[4:-4].split('</s>  <s>')
-        assert (len(passages) != 0)
-        for p in passages:
-          assert (len(p) > 0)
+        snippets = example[0].strip()[4:-4].split('</s>  <s>')
+        assert (len(snippets) != 0)
+        for s in snippets:
+          assert (len(s) > 0)
         yield {
             FeatureNames.QUESTION: question,
             FeatureNames.ANSWER: answer,
-            FeatureNames.SNIPPETS: passages
+            FeatureNames.SNIPPETS: snippets
         }
+
+
+def generate_text_for_vocab(raw_data_path):
+  for example in _parse_and_generate_searchqa_sampls(raw_data_path):
+    yield ' '.join(' '.join(example[FeatureNames.SNIPPETS]).split())
+    yield ' '.join(example[FeatureNames.QUESTION].split())
+    yield ' '.join(example[FeatureNames.ANSWER].split())
+
 
 def _prepare_serchqa_data(tmp_dir):
   file_path = generator_utils.maybe_download_from_drive(tmp_dir,
@@ -130,6 +138,7 @@ def _prepare_serchqa_data(tmp_dir):
     tf.logging.error("Please dowload the file 'SearchQA.zip' to the tmp_dir "
                      "through address: "
                      "https://drive.google.com/open?id=0B51lBZ1gs1XTR3BIVTJQWkREQU0")
+    raise zipfile.BadZipfile
 
   return os.path.join(tmp_dir, _FILENAME)
 
@@ -177,15 +186,6 @@ class SearchQa(text_problems.QuestionAndContext2TextProblem):
     return _UNK
 
 
-
-  def generate_text_for_vocab(self, raw_data_path):
-    for example in _parse_and_generate_searchqa_sampls(raw_data_path):
-      yield ' '.join(' '.join(example[FeatureNames.SNIPPETS]).split())
-      yield ' '.join(example[FeatureNames.QUESTION].split())
-      yield ' '.join(example[FeatureNames.ANSWER])
-
-
-
   def generate_samples(self, data_dir, tmp_dir, dataset_split):
 
     raw_data_dir = _prepare_serchqa_data(tmp_dir)
@@ -196,7 +196,7 @@ class SearchQa(text_problems.QuestionAndContext2TextProblem):
 
     if dataset_split == problem.DatasetSplit.TRAIN:
       dataset_file = train_file
-      _build_vocab(self.generate_text_for_vocab(dataset_file),
+      _build_vocab(generate_text_for_vocab(dataset_file),
         data_dir, self.vocab_filename, self.vocab_size)
 
     elif dataset_split == problem.DatasetSplit.EVAL:
@@ -298,13 +298,6 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
     return _UNK
 
 
-  def generate_text_for_vocab(self, raw_data_path):
-    for example in _parse_and_generate_searchqa_sampls(raw_data_path):
-      yield ' '.join(' '.join(example[FeatureNames.SNIPPETS]).split())
-      yield ' '.join(example[FeatureNames.QUESTION].split())
-      yield ' '.join(example[FeatureNames.ANSWER])
-
-
   @property
   def truncated_search_results(self):
       return 300
@@ -335,7 +328,7 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
     dev_file = os.path.join(raw_data_dir, "val.txt")
     test_file = os.path.join(raw_data_dir, "test.txt")
 
-    _build_vocab(self.generate_text_for_vocab(train_file),
+    _build_vocab(generate_text_for_vocab(train_file),
                  data_dir, self.vocab_filename, self.vocab_size)
 
     encoder = self.get_or_create_vocab(data_dir, tmp_dir)
@@ -404,8 +397,6 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
 
     if dataset_split == problem.DatasetSplit.TRAIN:
       dataset_file = train_file
-      _build_vocab(self.generate_text_for_vocab(dataset_file),
-        data_dir, self.vocab_filename, self.vocab_size)
 
     elif dataset_split == problem.DatasetSplit.EVAL:
       dataset_file = eval_file
@@ -414,7 +405,7 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
       dataset_file = test_file
 
     for example in _parse_and_generate_searchqa_sampls(dataset_file):
-
+      example = self.encode_example(example, encoder)
       snippets, question, answer = pad_input(example[FeatureNames.SNIPPETS],
                                              example[FeatureNames.QUESTION],
                                              example[FeatureNames.ANSWER])
@@ -464,8 +455,9 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
     example[FeatureNames.QUESTION] = question
     example[FeatureNames.ANSWER] = answer
 
-    if (snippet_length and search_results_length and
-        question_length and answer_length):
+    if not (snippet_length is None or search_results_length is None or
+        question_length is None or answer_length is None):
+      # The function is called for metadata extraction.
       snippet_length.extend([len(snippet) for snippet in snippets])
       search_results_length.append(len(snippets))
       question_length.append(len(question))
@@ -587,4 +579,3 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
 
     target_vocab_size = self._encoders["targets"].vocab_size
     p.target_modality = (registry.Modalities.SYMBOL, target_vocab_size)
-
