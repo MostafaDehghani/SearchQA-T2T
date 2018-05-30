@@ -1,17 +1,3 @@
-# coding=utf-8
-# Copyright 2018 The Tensor2Tensor Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """Data generators for SearchQA (https://github.com/nyu-dl/SearchQA).
 """
 
@@ -208,7 +194,7 @@ class SearchQa(text_problems.QuestionAndContext2TextProblem):
     def _generator():
       for example in _parse_and_generate_searchqa_sampls(dataset_file):
         yield {
-          'input': example[FeatureNames.QUESTION],
+          'inputs': example[FeatureNames.QUESTION],
           'target': example[FeatureNames.ANSWER],
           'context' : ' '.join(example[FeatureNames.SNIPPETS]),
         }
@@ -355,6 +341,7 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
               self.generate_encoded_samples(data_dir, tmp_dir, split,
                                             encoder)), paths)
 
+    generator_utils.shuffle_dataset(all_paths)
 
   def generate_encoded_samples(self, data_dir, tmp_dir, dataset_split, encoder):
     """Reads examples and encodes them using the given encoders.
