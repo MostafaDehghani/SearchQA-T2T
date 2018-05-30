@@ -392,7 +392,7 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
     raw_data_dir = _prepare_serchqa_data(tmp_dir)
 
     train_file = os.path.join(raw_data_dir, "train.txt")
-    eval_file = os.path.join(raw_data_dir, "val.tx")
+    eval_file = os.path.join(raw_data_dir, "val.txt")
     test_file = os.path.join(raw_data_dir, "test.txt")
 
     if dataset_split == problem.DatasetSplit.TRAIN:
