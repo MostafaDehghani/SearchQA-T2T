@@ -374,7 +374,7 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
         assert len(snippet) == self.max_snippet_length
 
       for _ in range(self.max_search_results_length - len(snippets)):
-        snippets.append([PAD for _ in range(self.snippet)])
+        snippets.append([PAD for _ in range(self.max_snippet_length)])
 
       for _ in range(self.max_question_length - len(question)):
         question.append(PAD)
