@@ -226,7 +226,7 @@ class SearchQaConcat(SearchQa):
 
 
 @registry.register_problem
-class SearchQaSnippets(text_problems.Text2TextProblem):
+class SearchQaSnippets(problem.Problem):
   """Base class for SearchQa question answering problems."""
   def __init__(self, *args, **kwargs):
 
@@ -253,8 +253,12 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
     assert not self._was_copy, 'This problem is not copyable!'
 
   @property
-  def is_generate_per_split(self):
+  def has_inputs(self):
     return True
+
+  # @property
+  # def is_generate_per_split(self):
+  #   return True
 
   @property
   def dataset_splits(self):
@@ -303,6 +307,29 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
   def vocab_filename(self):
       return "vocab.%s.%s" % (self.dataset_filename(),
                               text_problems.VocabType.TOKEN)
+
+
+  def get_or_create_vocab(self, data_dir, tmp_dir, force_get=False):
+    if self.vocab_type == text_problems.VocabType.CHARACTER:
+      encoder = text_encoder.ByteTextEncoder()
+    elif self.vocab_type == text_problems.VocabType.SUBWORD:
+      if force_get:
+        vocab_filepath = os.path.join(data_dir, self.vocab_filename)
+        encoder = text_encoder.SubwordTextEncoder(vocab_filepath)
+      else:
+        encoder = generator_utils.get_or_generate_vocab_inner(
+            data_dir, self.vocab_filename, self.approx_vocab_size,
+            self.generate_text_for_vocab(data_dir, tmp_dir),
+            max_subtoken_length=self.max_subtoken_length,
+            reserved_tokens=(
+                text_encoder.RESERVED_TOKENS + self.additional_reserved_tokens))
+    elif self.vocab_type == text_problems.VocabType.TOKEN:
+      vocab_filename = os.path.join(data_dir, self.vocab_filename)
+      encoder = text_encoder.TokenTextEncoder(vocab_filename,
+                                              replace_oov=self.oov_token)
+    else:
+      raise ValueError("Unrecognized VocabType")
+    return encoder
 
 
   def generate_data(self, data_dir, tmp_dir, task_id=-1):
@@ -512,6 +539,8 @@ class SearchQaSnippets(text_problems.Text2TextProblem):
     Returns:
       The processed example
     """
+    super(SearchQaSnippets, self).preprocess_example(
+      example, mode, unused_hparams)
     # add feature 'targets' to the example which is equal to Answer
     example['targets'] = example[FeatureNames.ANSWER]
     # In T2T, features are supposed to enter the pipeline as 3d tensors.
