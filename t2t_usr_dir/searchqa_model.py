@@ -96,9 +96,9 @@ class SearchqaTransformer(transformer.Transformer):
       features = {}
 
     # todo(dehghani): remove dim-expansion and check
-    story_old = None
+    snippets_old = None
     if len(features[searchqa_problem.FeatureNames.SNIPPETS].shape) < 4:
-      story_old = features[searchqa_problem.FeatureNames.SNIPPETS]
+      snippets_old = features[searchqa_problem.FeatureNames.SNIPPETS]
       features[searchqa_problem.FeatureNames.SNIPPETS] = tf.expand_dims(
         features[searchqa_problem.FeatureNames.SNIPPETS], 2)
 
@@ -204,8 +204,8 @@ class SearchqaTransformer(transformer.Transformer):
                                                            tf.TensorShape(
                                                              []), ],
                                          back_prop=False, parallel_iterations=1)
-    if story_old is not None:  # Restore to not confuse Estimator.
-      features[searchqa_problem.FeatureNames.SNIPPETS] = story_old
+    if snippets_old is not None:  # Restore to not confuse Estimator.
+      features[searchqa_problem.FeatureNames.SNIPPETS] = snippets_old
     if question_old is not None:  # Restore to not confuse Estimator.
       features[searchqa_problem.FeatureNames.QUESTION] = question_old
     # Reassign targets back to the previous value.
@@ -269,7 +269,7 @@ class SearchqaTransformer(transformer.Transformer):
     initial_ids = tf.zeros([batch_size], dtype=tf.int32)
 
     if self.has_input:
-      story_old = features[searchqa_problem.FeatureNames.SNIPPETS]
+      snippets_old = features[searchqa_problem.FeatureNames.SNIPPETS]
       question_old = features[searchqa_problem.FeatureNames.QUESTION]
 
       features[searchqa_problem.FeatureNames.SNIPPETS] = tf.expand_dims(
@@ -322,7 +322,7 @@ class SearchqaTransformer(transformer.Transformer):
 
     # Set inputs back to the unexpanded inputs to not to confuse the Estimator!
     if self.has_input:
-      features[searchqa_problem.FeatureNames.SNIPPETS] = story_old
+      features[searchqa_problem.FeatureNames.SNIPPETS] = snippets_old
       features[searchqa_problem.FeatureNames.QUESTION] = question_old
 
     # Return `top_beams` decodings (also remove initial id from the beam search)
@@ -367,27 +367,27 @@ class SearchqaTransformer(transformer.Transformer):
     hparams = self._hparams
     target_modality = self._problem_hparams.target_modality
 
-    story = features[searchqa_problem.FeatureNames.SNIPPETS]
+    snippets = features[searchqa_problem.FeatureNames.SNIPPETS]
     question = features[searchqa_problem.FeatureNames.QUESTION]
 
     if target_modality.is_class_modality:
       decode_length = 1
     else:
-      decode_length = (common_layers.shape_list(story)[1] +
+      decode_length = (common_layers.shape_list(snippets)[1] +
                        common_layers.shape_list(question)[1] + decode_length)
 
-    story = tf.expand_dims(story, axis=1)
+    snippets = tf.expand_dims(snippets, axis=1)
     question = tf.expand_dims(question, axis=1)
 
-    if len(story.shape) < 5:
-      story = tf.expand_dims(story, axis=4)
+    if len(snippets.shape) < 5:
+      snippets = tf.expand_dims(snippets, axis=4)
 
     if len(question.shape) < 5:
       question = tf.expand_dims(question, axis=4)
 
-    s = common_layers.shape_list(story)
+    s = common_layers.shape_list(snippets)
     batch_size = s[0]
-    story = tf.reshape(story, [s[0] * s[1], s[2], s[3], s[4]])
+    snippets = tf.reshape(snippets, [s[0] * s[1], s[2], s[3], s[4]])
 
     s = common_layers.shape_list(question)
     batch_size = s[0]
@@ -395,31 +395,31 @@ class SearchqaTransformer(transformer.Transformer):
     question = tf.reshape(question, [s[0] * s[1], s[2], s[3], s[4]])
 
     # _shard_features called to ensure that the variable names match
-    story = self._shard_features({searchqa_problem.FeatureNames.SNIPPETS: story}
+    snippets = self._shard_features({searchqa_problem.FeatureNames.SNIPPETS: snippets}
                                  )[searchqa_problem.FeatureNames.SNIPPETS]
 
     question = self._shard_features({searchqa_problem.FeatureNames.QUESTION: question}
                                     )[searchqa_problem.FeatureNames.QUESTION]
 
-    story_modality = self._problem_hparams.input_modality[
+    snippets_modality = self._problem_hparams.input_modality[
       searchqa_problem.FeatureNames.SNIPPETS]
     question_modality = self._problem_hparams.input_modality[
       searchqa_problem.FeatureNames.QUESTION]
 
-    with tf.variable_scope(story_modality.name):
-      story = story_modality.bottom_sharded(story, dp)
+    with tf.variable_scope(snippets_modality.name):
+      snippets = snippets_modality.bottom_sharded(snippets, dp)
 
     with tf.variable_scope(question_modality.name,
                            reuse=(
-                               story_modality.name == question_modality.name)):
+                               snippets_modality.name == question_modality.name)):
       question = question_modality.bottom_sharded(question, dp)
 
     with tf.variable_scope("body"):
       if target_modality.is_class_modality:
-        encoder_output = dp(self.encode, story, question,
+        encoder_output = dp(self.encode, snippets, question,
                             features["target_space_id"], hparams)
       else:
-        encoder_output, encoder_decoder_attention_bias = dp(self.encode, story,
+        encoder_output, encoder_decoder_attention_bias = dp(self.encode, snippets,
                                                             question, features[
                                                               "target_space_id"],
                                                             hparams,
@@ -550,7 +550,7 @@ class SearchqaTransformer(transformer.Transformer):
 
       return logits, losses
 
-  def snippet_encoding(self, input, original_input,
+  def inputs_encoding(self, input, original_input,
                       initializer=None, scope=None):
     """
     Implementation of the learned multiplicative mask from Section 2.1,
@@ -595,24 +595,24 @@ class SearchqaTransformer(transformer.Transformer):
 
     with tf.variable_scope('input'):
       # [batch_size, search_results_len, embed_sz]
-      encoded_story = self.inputs_encoding(input=snippets,
-                                           original_input=original_features.get(
-                                           searchqa_problem.FeatureNames.SNIPPETS),
-                                           initializer=tf.constant_initializer(
-                                             1.0), scope='story_encoding')
+      encoded_snippets = self.inputs_encoding(input=snippets,
+                                             original_input=original_features.get(
+                                             searchqa_problem.FeatureNames.SNIPPETS),
+                                             initializer=tf.constant_initializer(
+                                             1.0), scope='snippets_encoding')
 
       # [batch_size, 1, embed_sz]
       encoded_question = self.inputs_encoding(input=questions,
                                               original_input=original_features.get(
                                               searchqa_problem.FeatureNames.QUESTION),
                                               initializer=tf.constant_initializer(
-                                                1.0), scope='question_encoding')
+                                              1.0), scope='question_encoding')
 
     # Concat snippets and questions to creat the inputs
-    inputs = tf.concat([snippets, questions], axis=1)
+    inputs = tf.concat([encoded_snippets, encoded_question], axis=1)
     # the input is 4D by default and it gets squeezed from 4D to 3D in the
     # encode function, so we need to make it 4D by inserting channel dim.
-    # inputs = tf.expand_dims(inputs, axis = 2)
+    inputs = tf.expand_dims(inputs, axis = 2)
 
     losses = []
     encoder_output, encoder_decoder_attention_bias = self.encode(
@@ -639,3 +639,4 @@ class SearchqaTransformer(transformer.Transformer):
       return ret, {"extra_loss": tf.add_n(losses)}
     else:
       return ret
+
