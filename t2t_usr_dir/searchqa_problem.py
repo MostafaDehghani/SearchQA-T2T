@@ -13,6 +13,7 @@ import zipfile
 from tensor2tensor.data_generators import generator_utils
 from tensor2tensor.data_generators import problem
 from tensor2tensor.data_generators import text_problems
+from tensor2tensor.utils import metrics
 from tensor2tensor.data_generators import text_encoder
 from tensor2tensor.data_generators import tokenizer
 from tensor2tensor.utils import registry
@@ -364,9 +365,7 @@ class SearchQaSnippets(problem.Problem):
 
     for split, paths in split_paths:
       generator_utils.generate_files(
-          self._maybe_pack_examples(
-              self.generate_encoded_samples(data_dir, tmp_dir, split,
-                                            encoder)), paths)
+          self.generate_encoded_samples(data_dir, tmp_dir, split, encoder), paths)
 
     generator_utils.shuffle_dataset(all_paths)
 
@@ -573,6 +572,15 @@ class SearchQaSnippets(problem.Problem):
     return {FeatureNames.SNIPPETS: encoder,
             FeatureNames.QUESTION: encoder,
             'targets': encoder}
+
+  
+  def eval_metrics(self):
+    return [
+        metrics.Metrics.ACC, metrics.Metrics.ACC_TOP5,
+        metrics.Metrics.ACC_PER_SEQ, metrics.Metrics.NEG_LOG_PERPLEXITY,
+        metrics.Metrics.APPROX_BLEU, metrics.Metrics.ROUGE_2_F,
+        metrics.Metrics.ROUGE_L_F
+    ]  
 
   def hparams(self, defaults, unused_model_hparams):
     """Defines model hyperparameters.
